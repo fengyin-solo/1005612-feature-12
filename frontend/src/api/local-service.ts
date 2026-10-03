@@ -1,5 +1,6 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { legalMeterTarget, parseHeat, periodMatchesDate } from './heatmeter-service'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -42,6 +43,19 @@ export function runAction(key: string, id: number, action: string): ActionResult
   const current = String(rows[index].status)
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
+  }
+  // 抄表模块走专属状态机与口径：越级、错周期、无效累计热量在这里一并挡住。
+  if (key === 'heatmeter') {
+    const allowed = legalMeterTarget(current, action)
+    if (!allowed) {
+      return { ok: false, message: `抄表流程为 待抄表 → 抄表中 → 已核对，当前「${current}」不能执行「${action}」，越级拒收` }
+    }
+    if (!periodMatchesDate(rows[index]['结算周期'], rows[index]['抄表日期'])) {
+      return { ok: false, message: `抄表日期 ${rows[index]['抄表日期']} 不属于结算周期 ${rows[index]['结算周期']}` }
+    }
+    if (parseHeat(rows[index]['累计热量']) === null) {
+      return { ok: false, message: `累计热量「${rows[index]['累计热量']}」不是有效读数（GJ，最多三位小数），已挡回` }
+    }
   }
   const lastStatus = meta.statuses[meta.statuses.length - 1]
   const updated: EntryRow = {

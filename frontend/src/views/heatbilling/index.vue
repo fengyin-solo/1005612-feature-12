@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>热费结算管理</h2>
-        <p class="page-desc">维护热费结算单，围绕结算编号、用户名称、用热面积、热价标准做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护热费结算单，围绕结算编号、用户名称、结算周期、热价标准做登记、筛选与状态流转；抄表批量核对的结果先进入下方待复核清单。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记热费结算单</button>
@@ -17,6 +17,41 @@
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
     </div>
+
+    <section class="review-panel">
+      <header class="review-head">
+        <h3>抄表核对 · 待复核清单（{{ reviewQueue.length }}）</h3>
+        <span class="muted">来自热计量抄表「已核对」批次，需结算侧复核后转入待核算；复核不通过退回抄表异常</span>
+      </header>
+      <table v-if="reviewQueue.length" class="data-table">
+        <thead>
+          <tr>
+            <th>计量表号</th>
+            <th>用户名称</th>
+            <th>结算周期</th>
+            <th>累计热量(GJ)</th>
+            <th>抄表签字人</th>
+            <th>核对时间</th>
+            <th>复核操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in reviewQueue" :key="item.key">
+            <td>{{ item.meterCode }}</td>
+            <td>{{ item.userName }}</td>
+            <td>{{ item.period }}</td>
+            <td>{{ item.heat.toFixed(3) }}</td>
+            <td>{{ item.signer || '—' }}</td>
+            <td>{{ item.checkedAt }}</td>
+            <td class="row-actions">
+              <button class="link" type="button" @click="acceptItem(item.key)">转入待核算</button>
+              <button class="link danger" type="button" @click="rejectItem(item.key)">复核不通过</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty-state">暂无待复核条目，已核对的抄表批次会出现在这里</p>
+    </section>
 
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
@@ -74,30 +109,43 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  acceptReview,
+  loadReviewQueue,
+  rejectReview,
+} from '@/api/heatmeter-service'
+import {
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { BillingReviewItem, EntryRow } from '@/data/types'
 
 const meta = moduleMeta('heatbilling')
-const columns = ["结算编号", "用户名称", "用热面积", "热价标准", "应缴金额", "缴费日期", "收费员", "结算状态"]
+const columns = ["结算编号", "用户名称", "结算周期", "用热面积", "热价标准", "应缴金额", "缴费日期", "收费员", "结算状态"]
 const actions = ["提交核算", "登记缴费", "办理减免"]
 const statuses = ["待核算", "已核算", "已缴费", "已减免"]
-const stats = [{"label": "待核算用户", "value": 0}, {"label": "已缴费用户", "value": 0}, {"label": "本月应收金额", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
+const allRowsCache = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filterFields = ['结算编号', '用户名称', '结算周期']
+const reviewQueue = ref<BillingReviewItem[]>([])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
-    count: rows.value.filter((row) => String(row.status) === status).length,
+    count: allRowsCache.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+const stats = computed(() => [
+  { label: '待复核条目', value: reviewQueue.value.length },
+  { label: '待核算用户', value: allRowsCache.value.filter((row) => String(row.status) === '待核算').length },
+  { label: '已缴费用户', value: allRowsCache.value.filter((row) => String(row.status) === '已缴费').length },
+])
 
 function resetFilters() {
   filters.value = {}
@@ -122,12 +170,34 @@ function runAction(action: string, row: EntryRow) {
   reload()
 }
 
+function acceptItem(key: string) {
+  errorMessage.value = ''
+  const result = acceptReview(key)
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  reload()
+}
+
+function rejectItem(key: string) {
+  errorMessage.value = ''
+  const result = rejectReview(key)
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  reload()
+}
+
 function reload() {
   errorMessage.value = ''
   try {
     const payload = listEntries(meta.key, filters.value)
+    allRowsCache.value = payload.items
     rows.value = payload.items
     total.value = payload.total
+    reviewQueue.value = loadReviewQueue()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '热费结算列表读取失败'
   }
@@ -135,3 +205,11 @@ function reload() {
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.review-panel { border: 1px solid #b9d2ff; background: #f7faff; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.review-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.review-head h3 { margin: 0; font-size: 14px; }
+.muted { color: var(--muted); font-size: 12px; }
+.link.danger { color: #b42318; }
+</style>

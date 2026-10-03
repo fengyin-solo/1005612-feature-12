@@ -54,6 +54,32 @@ export function resetRows(key: string): EntryRow[] {
   return rows
 }
 
+// 业务模块之外的辅助数据（单列批次、跨模块待复核清单等）单独存一个键。
+const AUX_PREFIX = 'district-heating:'
+
+export function readAux<T>(key: string, fallback: () => T): T {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return fallback()
+  }
+  const raw = window.localStorage.getItem(AUX_PREFIX + key)
+  if (!raw) {
+    const value = fallback()
+    window.localStorage.setItem(AUX_PREFIX + key, JSON.stringify(value))
+    return value
+  }
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback()
+  }
+}
+
+export function writeAux<T>(key: string, value: T): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.setItem(AUX_PREFIX + key, JSON.stringify(value))
+  }
+}
+
 export function storageKey(): string {
   return STORAGE_KEY
 }
