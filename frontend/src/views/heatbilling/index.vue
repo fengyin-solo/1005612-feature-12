@@ -63,6 +63,45 @@
       </tbody>
     </table>
 
+    <h3 class="review-head">
+      结算待复核清单
+      <span class="review-count">共 {{ reviewRows.length }} 条，异常 {{ abnormalReviewCount }} 条</span>
+    </h3>
+    <p class="review-desc">热计量抄表核对结果会逐条同步到这里；同一抄表记录重复同步只保留一条。</p>
+    <table class="data-table review-table">
+      <thead>
+        <tr>
+          <th>抄表编号</th>
+          <th>计量表号</th>
+          <th>用户名称</th>
+          <th>结算周期</th>
+          <th>表显累计热量(GJ)</th>
+          <th>复核累计热量(GJ)</th>
+          <th>核对结果</th>
+          <th>核对人</th>
+          <th>核对时间</th>
+          <th>备注</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="review in reviewRows" :key="String(review.id)" :class="{ 'review-abnormal': review.核对结果 === '异常待复核' }">
+          <td>HEAT-{{ String(review.id).padStart(4, '0') }}</td>
+          <td>{{ review.计量表号 }}</td>
+          <td>{{ review.用户名称 }}</td>
+          <td>{{ review.结算周期 }}</td>
+          <td>{{ formatHeat(review.累计热量) }}</td>
+          <td>{{ formatHeat(review.复核热量) }}</td>
+          <td>{{ review.核对结果 }}</td>
+          <td>{{ review.核对人 }}</td>
+          <td>{{ review.核对时间 }}</td>
+          <td>{{ review.备注 }}</td>
+        </tr>
+        <tr v-if="!reviewRows.length">
+          <td colspan="10" class="empty-state">暂无待复核记录，先到热计量抄表完成核对</td>
+        </tr>
+      </tbody>
+    </table>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条热费结算记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -75,11 +114,12 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
+  listBillingReviews,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { BillingReview, EntryRow } from '@/data/types'
 
 const meta = moduleMeta('heatbilling')
 const columns = ["结算编号", "用户名称", "用热面积", "热价标准", "应缴金额", "缴费日期", "收费员", "结算状态"]
@@ -92,12 +132,24 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const reviewRows = ref<BillingReview[]>([])
+const abnormalReviewCount = computed(() =>
+  reviewRows.value.filter((review) => review.核对结果 === '异常待复核').length,
+)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+function formatHeat(value: number | string): string {
+  if (value === '' || value === null || value === undefined) {
+    return '—'
+  }
+  const num = Number(value)
+  return Number.isFinite(num) ? num.toFixed(2) : String(value)
+}
 
 function resetFilters() {
   filters.value = {}
@@ -128,6 +180,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    reviewRows.value = listBillingReviews()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '热费结算列表读取失败'
   }
@@ -135,3 +188,31 @@ function reload() {
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.review-head {
+  margin: 18px 0 4px;
+  font-size: 15px;
+}
+.review-count {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.review-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.review-table {
+  margin-bottom: 12px;
+}
+.review-abnormal {
+  background: #fef3f2;
+}
+.review-abnormal td:nth-child(7) {
+  color: #b42318;
+  font-weight: 600;
+}
+</style>

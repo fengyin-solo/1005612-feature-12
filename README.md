@@ -68,4 +68,9 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `district-heating:entries` 这一项，或调用 `resetModule(模块)`。
+- 热计量抄表是严格流转模块：`待抄表 → 抄表中 → 已核对/抄表异常`，越级动作在服务层拒收；
+  报送要求抄表人签字、抄表日期与结算周期对齐、两处累计热量均为有效非负值，同表号同周期
+  重复报送只保留一条。批量核对支持多选一次提交，按结算周期分组，组内抄表方式不一致的整组
+  单列；两处累计热量差值不超过 0.01 GJ 视为一致，超差登记抄表异常。核对结果同步到
+  热费结算页的「结算待复核清单」（独立命名空间 `district-heating:billing-reviews:*`，按抄表记录编号去重）。
+- 想回到初始数据：清掉浏览器里 `district-heating:entries:*` 这一项，或调用 `resetModule(模块)`。
